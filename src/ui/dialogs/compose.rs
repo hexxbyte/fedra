@@ -1221,7 +1221,7 @@ pub fn prompt_for_compose(
 	}
 	Some((
 		PostResult {
-			content: trimmed.to_string(),
+			content: trimmed.replace("\r\n", "\n"),
 			visibility,
 			sensitive,
 			spoiler_text,

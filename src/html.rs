@@ -12,40 +12,37 @@ pub fn strip_html(html: &str) -> String {
 fn append_text(node: ego_tree::NodeRef<scraper::node::Node>, output: &mut String) {
 	match node.value() {
 		scraper::node::Node::Text(text) => {
-			output.push_str(text);
+			// Newlines right after a <br> or block boundary are source formatting
+			// (e.g. `</p>\n<p>`), not extra blank lines.
+			if output.is_empty() || output.ends_with('\n') {
+				if text.contains('\n') && text.trim_ascii().is_empty() {
+					return;
+				}
+				output.push_str(text.trim_start_matches(['\r', '\n']));
+			} else {
+				output.push_str(text);
+			}
 		}
 		scraper::node::Node::Element(element) => {
 			let name = element.name();
 			if name == "br" {
-				push_newline(output);
+				output.push('\n');
 				return;
 			}
-			let is_block = matches!(
-				name,
-				"p" | "div"
-					| "li"
-					| "ul"
-					| "ol"
-					| "blockquote"
-					| "pre"
-					| "section"
-					| "article"
-					| "header"
-					| "footer"
-					| "h1"
-					| "h2"
-					| "h3"
-					| "h4"
-					| "h5"
-					| "h6"
-			);
-			if is_block {
+			let is_paragraph = matches!(name, "p" | "blockquote" | "pre" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+			let is_other_block =
+				matches!(name, "div" | "li" | "ul" | "ol" | "section" | "article" | "header" | "footer");
+			if is_paragraph {
+				push_paragraph_break(output);
+			} else if is_other_block {
 				push_newline(output);
 			}
 			for child in node.children() {
 				append_text(child, output);
 			}
-			if is_block {
+			if is_paragraph {
+				push_paragraph_break(output);
+			} else if is_other_block {
 				push_newline(output);
 			}
 		}
@@ -59,6 +56,17 @@ fn push_newline(output: &mut String) {
 	}
 }
 
+fn push_paragraph_break(output: &mut String) {
+	if output.is_empty() {
+		return;
+	}
+	if !output.ends_with('\n') {
+		output.push_str("\n\n");
+	} else if !output.ends_with("\n\n") {
+		output.push('\n');
+	}
+}
+
 fn normalize_text(input: &str) -> String {
 	let mut output = String::with_capacity(input.len());
 	let mut last_was_space = false;
@@ -67,9 +75,7 @@ fn normalize_text(input: &str) -> String {
 		match ch {
 			'\r' => {}
 			'\n' => {
-				if !output.ends_with('\n') {
-					output.push('\n');
-				}
+				output.push('\n');
 				last_was_space = false;
 				last_was_newline = true;
 			}
@@ -169,4 +175,65 @@ pub fn extract_links(html: &str) -> Vec<Link> {
 		}
 	}
 	links
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn preserves_single_blank_line_between_paragraphs() {
+		let html = "<p>Line 1<br>Line 2</p><p>Line 4</p>";
+		let text = strip_html(html);
+		assert_eq!(text, "Line 1\nLine 2\n\nLine 4");
+	}
+
+	#[test]
+	fn preserves_multiple_blank_lines() {
+		let html = "<p>Line 1</p><p><br></p><p>Line 4</p>";
+		let text = strip_html(html);
+		assert_eq!(text, "Line 1\n\n\nLine 4");
+	}
+
+	#[test]
+	fn preserves_multiple_br_tags() {
+		let html = "<p>Line 1<br><br>Line 3</p>";
+		let text = strip_html(html);
+		assert_eq!(text, "Line 1\n\nLine 3");
+	}
+
+	#[test]
+	fn caps_excessive_blank_lines_at_two() {
+		let html = "<p>Line 1<br><br><br><br><br>Line 2</p>";
+		let text = strip_html(html);
+		assert_eq!(text, "Line 1\n\n\nLine 2");
+	}
+
+	#[test]
+	fn handles_nested_divs_and_paragraphs() {
+		let html = "<div><p>Hello</p><p>World</p></div>";
+		let text = strip_html(html);
+		assert_eq!(text, "Hello\n\nWorld");
+	}
+
+	#[test]
+	fn ignores_source_newlines_between_tags() {
+		let html = "<p>Line 1<br>\nLine 2</p>\n<p>Line 4</p>\r\n";
+		let text = strip_html(html);
+		assert_eq!(text, "Line 1\nLine 2\n\nLine 4");
+	}
+
+	#[test]
+	fn handles_list_items() {
+		let html = "<ul><li>Item 1</li><li>Item 2</li></ul>";
+		let text = strip_html(html);
+		assert_eq!(text, "Item 1\nItem 2");
+	}
+
+	#[test]
+	fn preserves_leading_indentation_with_blank_lines() {
+		let html = "<p>Line 1<br>&nbsp;&nbsp;Indented</p><p>&nbsp;&nbsp;Next Paragraph</p>";
+		let text = strip_html(html);
+		assert_eq!(text, "Line 1\n\u{00A0}\u{00A0}Indented\n\n\u{00A0}\u{00A0}Next Paragraph");
+	}
 }
