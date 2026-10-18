@@ -107,7 +107,8 @@ impl MastodonClient {
 		if let Some(description) = description
 			&& !description.trim().is_empty()
 		{
-			form = form.text("description", description.to_string());
+			let normalized = description.replace("\r\n", "\n");
+			form = form.text("description", normalized);
 		}
 		let response =
 			self.http.post(url).bearer_auth(access_token).multipart(form).send().context("Failed to upload media")?;

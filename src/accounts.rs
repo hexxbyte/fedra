@@ -147,6 +147,7 @@ pub fn switch_to_account(
 		state.client = Some(client.clone());
 		if let Ok(info) = client.get_instance_info() {
 			state.max_post_chars = Some(info.max_post_chars);
+			state.max_media_description_chars = Some(info.max_media_description_chars);
 			state.poll_limits = info.poll_limits;
 			if let Some(ref streaming_url) = info.streaming_url
 				&& let Ok(parsed) = Url::parse(streaming_url)

@@ -161,6 +161,7 @@ pub fn run_edit_post_dialog(
 		target,
 		source_text,
 		max_post_chars,
+		state.max_media_description_chars,
 		&state.poll_limits,
 		enter_to_send,
 		dialogs::MentionSource::from_state(state),
@@ -226,6 +227,7 @@ pub(super) fn new_post(ctx: &mut UiCommandContext<'_>) {
 	let Some((post, config)) = dialogs::prompt_for_post(
 		frame,
 		max_post_chars,
+		state.max_media_description_chars,
 		&poll_limits,
 		enter_to_send,
 		default_visibility,
@@ -256,6 +258,7 @@ pub(super) fn continue_thread(ctx: &mut UiCommandContext<'_>, mut status: Box<St
 		frame,
 		&status,
 		max_post_chars,
+		state.max_media_description_chars,
 		&state.poll_limits,
 		true,
 		self_acct,
@@ -306,6 +309,7 @@ pub(super) fn reply(ctx: &mut UiCommandContext<'_>, reply_all: bool) {
 		frame,
 		target,
 		max_post_chars,
+		state.max_media_description_chars,
 		&state.poll_limits,
 		reply_all,
 		self_acct,
@@ -390,6 +394,7 @@ pub(super) fn prompt_for_quote(ctx: &mut UiCommandContext<'_>, target: Box<Statu
 		frame,
 		&target,
 		state.max_post_chars,
+		state.max_media_description_chars,
 		&state.poll_limits,
 		state.config.enter_to_send,
 		dialogs::MentionSource::from_state(state),
@@ -831,6 +836,7 @@ pub(super) fn recover_draft(ctx: &mut UiCommandContext<'_>) {
 	config.initial_language = pending.last_result.language;
 	config.default_visibility = pending.last_result.visibility;
 	config.initial_thread_mode = pending.last_result.continue_thread;
+	config.max_media_description_chars = state.max_media_description_chars;
 	let Some((new_post, new_config)) = dialogs::prompt_for_compose(
 		ctx.frame,
 		state.max_post_chars,

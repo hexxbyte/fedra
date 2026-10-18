@@ -508,6 +508,7 @@ pub(super) fn send_direct_message(ctx: &mut UiCommandContext<'_>, account: Accou
 		frame,
 		&account,
 		max_post_chars,
+		state.max_media_description_chars,
 		&poll_limits,
 		enter_to_send,
 		dialogs::MentionSource::from_state(state),

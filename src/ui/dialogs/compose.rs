@@ -91,6 +91,7 @@ pub struct ComposeDialogConfig {
 	pub show_thread_checkbox: bool,
 	pub initial_thread_mode: bool,
 	pub quoted_text: Option<String>,
+	pub max_media_description_chars: Option<usize>,
 }
 
 const fn visibility_index(visibility: PostVisibility) -> usize {
@@ -384,8 +385,10 @@ fn prompt_for_media(
 	parent: &dyn WxWidget,
 	initial: Vec<PostMedia>,
 	initial_sensitive: bool,
+	max_desc_chars: usize,
 ) -> Option<(Vec<PostMedia>, bool)> {
-	let dialog = Dialog::builder(parent, "Manage Media").with_size(520, 360).build();
+	const ID_MEDIA_OK: i32 = 26002;
+	let dialog = Dialog::builder(parent, "Manage Media").with_size(520, 420).build();
 	let panel = Panel::builder(&dialog).build();
 	let main_sizer = BoxSizer::builder(Orientation::Vertical).build();
 	let list_label = StaticText::builder(&panel).with_label("Attachments:").build();
@@ -394,10 +397,11 @@ fn prompt_for_media(
 	let remove_button = Button::builder(&panel).with_label("Remove").build();
 	let sensitive_checkbox = CheckBox::builder(&panel).with_label("Mark media as sensitive").build();
 	sensitive_checkbox.set_value(initial_sensitive);
-	let desc_label = StaticText::builder(&panel).with_label("Description for selected media:").build();
-	let desc_text = TextCtrl::builder(&panel).build();
+	let desc_label = StaticText::builder(&panel).with_label("&Description for selected media:").build();
+	let desc_text = TextCtrl::builder(&panel).with_style(TextCtrlStyle::MultiLine).build();
+	desc_text.set_min_size(Size::new(-1, 80));
 	let buttons_sizer = BoxSizer::builder(Orientation::Horizontal).build();
-	let ok_button = Button::builder(&panel).with_id(ID_OK).with_label("Done").build();
+	let ok_button = Button::builder(&panel).with_id(ID_MEDIA_OK).with_label("Done").build();
 	ok_button.set_default();
 	let cancel_button = Button::builder(&panel).with_id(ID_CANCEL).with_label("Cancel").build();
 	let list_sizer = BoxSizer::builder(Orientation::Horizontal).build();
@@ -413,16 +417,34 @@ fn prompt_for_media(
 	main_sizer.add_sizer(&list_sizer, 1, SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right, 8);
 	main_sizer.add(&sensitive_checkbox, 0, SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top, 8);
 	main_sizer.add(&desc_label, 0, SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top, 8);
-	main_sizer.add(&desc_text, 0, SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right, 8);
+	main_sizer.add(&desc_text, 1, SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right, 8);
 	main_sizer.add_sizer(&buttons_sizer, 0, SizerFlag::Expand | SizerFlag::All, 8);
 	panel.set_sizer(main_sizer, true);
 	let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
 	dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
 	dialog.set_sizer(dialog_sizer, true);
-	dialog.set_affirmative_id(ID_OK);
+	dialog.set_affirmative_id(ID_MEDIA_OK);
 	dialog.set_escape_id(ID_CANCEL);
 	let items: Rc<RefCell<Vec<PostMedia>>> = Rc::new(RefCell::new(initial));
 	refresh_media_list(media_list, &items.borrow());
+
+	let dialog_title = dialog;
+	let desc_text_title = desc_text;
+	let media_list_title = media_list;
+	let update_title = move || {
+		if media_list_title.get_selection().is_some() {
+			let count = desc_text_title.get_value().trim().chars().count();
+			let remaining = if count <= max_desc_chars {
+				format!("{} remaining", max_desc_chars - count)
+			} else {
+				format!("{} over limit", count - max_desc_chars)
+			};
+			dialog_title.set_label(&format!("Manage Media - {count} of {max_desc_chars} characters ({remaining})"));
+		} else {
+			dialog_title.set_label("Manage Media");
+		}
+	};
+
 	if !items.borrow().is_empty() {
 		media_list.set_selection(0, true);
 		remove_button.enable(true);
@@ -436,11 +458,14 @@ fn prompt_for_media(
 		desc_label.enable(false);
 		desc_text.enable(false);
 	}
+	update_title();
+
 	let items_add = items.clone();
 	let media_list_add = media_list;
 	let remove_button_add = remove_button;
 	let desc_label_add = desc_label;
 	let desc_text_add = desc_text;
+	let update_title_add = update_title;
 	add_button.on_click(move |_| {
 		let file_dialog = FileDialog::builder(&panel)
 			.with_message("Select media to attach")
@@ -472,6 +497,7 @@ fn prompt_for_media(
 					desc_text_add.enable(true);
 					desc_text_add.set_value("");
 				}
+				update_title_add();
 			}
 		}
 	});
@@ -480,6 +506,7 @@ fn prompt_for_media(
 	let remove_button_remove = remove_button_add;
 	let desc_label_remove = desc_label;
 	let desc_text_remove = desc_text;
+	let update_title_remove = update_title;
 	remove_button.on_click(move |_| {
 		if let Some(selection) = media_list_remove.get_selection() {
 			let index = selection as usize;
@@ -501,14 +528,18 @@ fn prompt_for_media(
 			}
 		}
 		desc_text_remove.set_value("");
-		desc_label_remove.enable(false);
-		desc_text_remove.enable(false);
+		if media_list_remove.get_selection().is_none() {
+			desc_label_remove.enable(false);
+			desc_text_remove.enable(false);
+		}
+		update_title_remove();
 	});
 	let items_select = items.clone();
 	let desc_label_select = desc_label_remove;
 	let desc_text_select = desc_text_remove;
 	let remove_button_select = remove_button_remove;
 	let media_list_select = media_list_remove;
+	let update_title_select = update_title;
 	media_list_select.on_selection_changed(move |_| {
 		let selection = media_list_select.get_selection().map(|sel| sel as usize);
 		let selected_desc = {
@@ -532,9 +563,11 @@ fn prompt_for_media(
 			desc_text_select.enable(false);
 			remove_button_select.enable(false);
 		}
+		update_title_select();
 	});
 	let items_desc = items.clone();
 	let media_list_desc = media_list_select;
+	let update_title_desc = update_title;
 	desc_text_select.on_text_changed(move |_| {
 		let selection = media_list_desc.get_selection().map(|sel| sel as usize);
 		let mut items = items_desc.borrow_mut();
@@ -543,14 +576,64 @@ fn prompt_for_media(
 		{
 			let value = desc_text_select.get_value();
 			let trimmed = value.trim();
+			if trimmed.chars().count() > max_desc_chars {
+				bell();
+			}
 			items[index].description = if trimmed.is_empty() { None } else { Some(trimmed.to_string()) };
+			update_title_desc();
 		}
 	});
+
+	let dialog_ok = dialog;
+	let items_ok = items.clone();
+	ok_button.on_click(move |_| {
+		if descriptions_within_limit(dialog_ok, &items_ok.borrow(), max_desc_chars) {
+			dialog_ok.end_modal(ID_OK);
+		}
+	});
+
+	let dialog_enter = dialog;
+	let items_enter = items.clone();
+	dialog.bind_internal(EventType::CHAR_HOOK, move |event| {
+		let key_event = KeyboardEvent::new(event);
+		if key_event.get_key_code() == Some(keys::RETURN)
+			&& key_event.control_down()
+			&& !key_event.shift_down()
+			&& !key_event.alt_down()
+			&& !key_event.meta_down()
+		{
+			if descriptions_within_limit(dialog_enter, &items_enter.borrow(), max_desc_chars) {
+				dialog_enter.end_modal(ID_OK);
+			}
+			key_event.event.skip(false);
+		} else {
+			key_event.event.skip(true);
+		}
+	});
+
 	dialog.centre();
 	let result = dialog.show_modal();
 	let media = (items.borrow().clone(), sensitive_checkbox.get_value());
 	dialog.destroy();
 	(result == ID_OK).then_some(media)
+}
+
+/// Warns about the first attachment whose description is over the limit.
+fn descriptions_within_limit(dialog: Dialog, items: &[PostMedia], max_desc_chars: usize) -> bool {
+	let over = items.iter().enumerate().find_map(|(i, item)| {
+		let count = item.description.as_deref()?.chars().count();
+		(count > max_desc_chars).then_some((i, count))
+	});
+	let Some((i, count)) = over else { return true };
+	show_warning(
+		&dialog,
+		format!(
+			"Description for attachment {} is {count} characters, which exceeds the {max_desc_chars} character limit.",
+			i + 1
+		),
+		"Manage Media",
+	);
+	false
 }
 
 pub fn prompt_for_vote(frame: &Frame, poll: &crate::mastodon::Poll, post_text: &str) -> Option<Vec<usize>> {
@@ -909,10 +992,14 @@ pub fn prompt_for_compose(
 	let media_items_manage = media_items.clone();
 	let sensitive_state_manage = sensitive_state.clone();
 	let media_parent = dialog;
+	let max_desc_chars =
+		config.max_media_description_chars.unwrap_or(crate::mastodon::DEFAULT_MAX_MEDIA_DESCRIPTION_CHARS);
 	media_button.on_click(move |_| {
 		let current = media_items_manage.borrow().clone();
 		let current_sensitive = *sensitive_state_manage.borrow();
-		if let Some((updated, updated_sensitive)) = prompt_for_media(&media_parent, current, current_sensitive) {
+		if let Some((updated, updated_sensitive)) =
+			prompt_for_media(&media_parent, current, current_sensitive, max_desc_chars)
+		{
 			*media_items_manage.borrow_mut() = updated;
 			*sensitive_state_manage.borrow_mut() = updated_sensitive;
 		}
@@ -1152,6 +1239,7 @@ pub fn prompt_for_compose(
 pub fn prompt_for_post(
 	frame: &Frame,
 	max_chars: Option<usize>,
+	max_media_description_chars: Option<usize>,
 	poll_limits: &PollLimits,
 	enter_to_send: bool,
 	default_visibility: Option<PostVisibility>,
@@ -1175,6 +1263,7 @@ pub fn prompt_for_post(
 			show_thread_checkbox: true,
 			initial_thread_mode: false,
 			quoted_text: None,
+			max_media_description_chars,
 		},
 		Vec::new(),
 		None,
@@ -1186,6 +1275,7 @@ pub fn prompt_for_direct_message(
 	frame: &Frame,
 	recipient: &crate::mastodon::Account,
 	max_chars: Option<usize>,
+	max_media_description_chars: Option<usize>,
 	poll_limits: &PollLimits,
 	enter_to_send: bool,
 	mention_source: MentionSource,
@@ -1209,6 +1299,7 @@ pub fn prompt_for_direct_message(
 			show_thread_checkbox: true,
 			initial_thread_mode: false,
 			quoted_text: None,
+			max_media_description_chars,
 		},
 		Vec::new(),
 		None,
@@ -1220,6 +1311,7 @@ pub fn prompt_for_reply(
 	frame: &Frame,
 	replying_to: &Status,
 	max_chars: Option<usize>,
+	max_media_description_chars: Option<usize>,
 	poll_limits: &PollLimits,
 	reply_all: bool,
 	self_acct: Option<&str>,
@@ -1283,6 +1375,7 @@ pub fn prompt_for_reply(
 			show_thread_checkbox: true,
 			initial_thread_mode,
 			quoted_text: None,
+			max_media_description_chars,
 		},
 		Vec::new(),
 		None,
@@ -1295,6 +1388,7 @@ pub fn prompt_for_edit(
 	status: &Status,
 	source_text: Option<&str>,
 	max_chars: Option<usize>,
+	max_media_description_chars: Option<usize>,
 	poll_limits: &PollLimits,
 	enter_to_send: bool,
 	mention_source: MentionSource,
@@ -1335,6 +1429,7 @@ pub fn prompt_for_edit(
 			show_thread_checkbox: false,
 			initial_thread_mode: false,
 			quoted_text: None,
+			max_media_description_chars,
 		},
 		initial_media,
 		initial_poll,
@@ -1346,6 +1441,7 @@ pub fn prompt_for_quote(
 	frame: &Frame,
 	quoting: &Status,
 	max_chars: Option<usize>,
+	max_media_description_chars: Option<usize>,
 	poll_limits: &PollLimits,
 	enter_to_send: bool,
 	mention_source: MentionSource,
@@ -1376,6 +1472,7 @@ pub fn prompt_for_quote(
 			show_thread_checkbox: false,
 			initial_thread_mode: false,
 			quoted_text: Some(quoted_text),
+			max_media_description_chars,
 		},
 		Vec::new(),
 		None,
